@@ -108,6 +108,8 @@ create table if not exists dazhong(
 shop_id int not null,
 navigation char(150) not null,
 recommended_dishes text,
+characteristics text,
+stars float(2, 1),
 photos char(100) not null,
 description text,
 tags char(200),
