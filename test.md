@@ -304,42 +304,42 @@ create index index_name_price on basic(avg_price,name);
 
 ## 一个表中 group by,order by,having 联合查询
 ### A
-实际应用中会出现分组排序筛选查找的情况,比如将 base 按 name 分组,筛选出连锁店,并且按平均价格 avg_price 排序
+实际应用中会出现分组排序筛选查找的情况,比如将 remark 按环境评分 environment_rating 分组,筛选出食品评分 product_rating > 7 的餐馆, 并且按平均评价数量 all_remarks 排序
 
 ```sql
-	explain select name,avg_price,is_chains
-	from basic
-	group by name
-	having is_chains=1
-	order by avg_price;
+	explain select shop_id,environment_rating,product_rating,all_remarks
+	from remark
+	group by environment_rating
+	having product_rating>7
+	order by all_remarks;
 	```
 
 	```
-+----+-------------+-------+------+---------------+------+---------+------+------+-------------+
-| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
-+----+-------------+-------+------+---------------+------+---------+------+------+-------------+
-| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
-+----+-------------+-------+------+---------------+------+---------+------+------+-------------+
-1 rows in set (0.05 sec)
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+| id | select_type | table  | type | possible_keys | key  | key_len | ref  | rows | Extra                           |
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+| 1  | SIMPLE      | remark | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using temporary; Using filesort |
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+1 rows in set (0.03 sec)
 ```
 
-可见 rows 为 963
+可见 rows 为 1000
 
-经过优化:对 name 进行索引
+经过优化:对 environment_rating,product_rating,all_remarks 进行索引
 
 	```sql
-	create index index_name on basic(name);
+	create index index_1 on remark(environment_rating,product_rating,all_remarks);
 	```
 
 	再次查找
 
 	```
-+----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
-| id | select_type | table | type  | possible_keys | key        | key_len | ref  | rows | Extra                 |
-+----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
-| 1  | SIMPLE      | basic | range | index_name    | index_name | 150     | NULL | 3    | Using index condition |
-+----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
-1 rows in set (0.04 sec)
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+| id | select_type | table  | type  | possible_keys | key     | key_len | ref  | rows | Extra                                                     |
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+| 1  | SIMPLE      | remark | range | index_1       | index_1 | 5       | NULL | 84   | Using index for group-by; Using temporary; Using filesort |
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+1 rows in set (0.06 sec)
 ```
 
-可见 rows 已经变为 3 ,是优化前的 0.3%
+可见 rows 已经变为 84 ,是优化前的 0.84%
