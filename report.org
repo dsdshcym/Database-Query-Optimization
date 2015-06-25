@@ -1,4 +1,48 @@
-* 配置信息
+#+TITLE: MYSQL 查询优化实验报告
+#+AUTHOR: 陈一鸣 解子傲
+* 概述
+** 主要目的
+通过对不同情况下查询语句的执行分析，巩固和加深对查询和查询优化相关理论知识的理解，
+提高优化数据库系统的实践能力。
+** 优化手段
+主要用到的优化手段与工具如下，参考资料也一并列出
+*** Explain
+- [[http://cbb.sjtu.edu.cn/course/database/lab6.htm][实验6：数据库查询优化与范式]]
+- [[http://www.cnblogs.com/magialmoon/p/3439042.html][MySQL优化—工欲善其事，必先利其器之EXPLAIN]]
+*** 建立索引
+- 课本内容
+*** 优化语句
+- 课本内容
+*** 慢查询日志
+- [[http://www.cnblogs.com/zhanjindong/p/3472804.html#manchaxunrizhi][MySQL优化—工欲善其事，必先利其器（2）慢查询部分]]
+*** Percona Toolkit
+- [[http://www.cnblogs.com/zhanjindong/p/3472804.html#PerconaToolkit][MySQL优化—工欲善其事，必先利其器（2）Percona Toolkit 部分]]
+- [[https://www.percona.com/doc/percona-toolkit/2.1/][PERCONA TOOLKIT DOCUMENTATION]]
+*** Docker
+- [[https://www.docker.com][Docker]]
+- [[https://registry.hub.docker.com/_/mysql/][Docker MySQL repository]]
+- http://dockerpool.com/static/books/docker_practice/appendix_repo/mysql.html
+- http://blog.flux7.com/blogs/docker/docker-tutorial-series-part-1-an-introduction
+** 优化思路
+由于本次实验的数据量较小，各种查询（嵌套查询除外）几乎都能在 0.1 秒以下的时间运
+行完毕，而这个时间很大程度还受到其他因素的影响（如：机器当前负载等）。而这么短的
+时间也无法进行慢查询日志的记录， Percona Toolkit 可以做到精确到纳秒，但仍要基于
+慢日志查询。故本次优化不以执行 SQL 语句的时间为标准，而是以 Explain 语句结果中的
+rows 指标为标准， rows 越小，认为效率越高。主要的优化手段也只用到了 *Explain*,
+*Index* 和 *语句的优化* 。
+*** 优化过程
+1. Explain 原查询
+2. 结合 Explain 结果进行优化
+3. Explain 优化后的查询
+* 实验环境
+本次实验为了统一两人的环境，将实验环境搭建在了实验室内网的一台 PC 上，不仅如此，
+还将 MySQL 搭建在了 Docker 虚拟机中。每次实验前用 Python 脚本将数据库重置一遍，
+严格控制变量。（另：此处能用 DockerFile 进行初始化，但因初始化的同时要进行数据的
+初始化，故选择 Python 脚本）
+
+以下是实验环境的具体信息
+
+** PC 信息
 - System Information
   - Manufacturer: Dell Inc.
   - Product Name: Inspiron 620
@@ -17,6 +61,69 @@
 - Hard Drive
 
   1 TB 7200 rpm
+** Docker
+*** Docker 简介
+Docker 是一个开源的应用容器引擎，让开发者可以打包他们的应用以及依赖包到一个可移
+植的容器中，然后发布到任何流行的 Linux 机器上，也可以实现虚拟化。容器是完全使用
+沙箱机制，相互之间不会有任何接口（类似 iPhone 的 app）。几乎没有性能开销,可以很
+容易地在机器和数据中心中运行。最重要的是，他们不依赖于任何语言、框架包括系统。[fn:2]
+*** Docker Mysql
+以下是用 Docker 建立本次实验环境的语句（仅供参考）：
+- Pull
+  #+BEGIN_SRC sh
+    docker pull dl.dockerpool.com:5000/mysql:latest
+    docker tag dl.dockerpool.com:5000/mysql:latest mysql:latest
+  #+END_SRC
+- Run
+  #+BEGIN_SRC sh
+    docker run --name test-mysql -e MYSQL_ROOT_PASSWORD=123123 -p 3306:3306 -d mysql
+  #+END_SRC
+- Shell
+  #+BEGIN_SRC sh
+    docker exec -it test-mysql bash
+  #+END_SRC
+*** Docker info
+本次 Docker 的运行环境
+
+#+BEGIN_SRC sh
+  docker info
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+  Storage Driver: aufs
+   Root Dir: /var/lib/docker/aufs
+   Backing Filesystem: extfs
+   Dirs: 29
+   Dirperm1 Supported: true
+  Execution Driver: native-0.2
+  Kernel Version: 3.16.0-38-generic
+  Operating System: Ubuntu 14.04.2 LTS
+  CPUs: 4
+  Total Memory: 3.844 GiB
+#+END_EXAMPLE
+*** 使用 Docker 的好处
+1. 多个 MySQL 实例并行
+
+   可以同时在一台机上运行多个 Docker 实例（即多个 MySQL 实例），两个人可同时进行
+   实验，且互不影响。
+
+2. 方便重置
+
+   只用执行几段代码即可重新搭建出一个新的实验环境，结合 Python 脚本做到任意操作
+   数据库都能轻松回到初始状态。
+
+3. 与本机隔离
+
+   由于跑在虚拟机中，故不必担心影响到服务器本身的环境。
+** Python 脚本
+详见本项目 Github 主页[fn:3]
+*** reset.py
+
+调用 =init.sql= 中的 sql 语句将数据库重置。
+*** update.py
+
+利用数据库中已有的表信息，从 csv 文件中提取出相应的数据载入到数据库中。（因此只
+需要完成表的设计即能自动录入，即便表结构变化也不会受到影响）
 * 查询优化
 ** 单表操作
 *** 查询表中的所有字段
@@ -831,3 +938,7 @@
 * Footnotes
 
 [fn:1] http://blog.itpub.net/22664653/viewspace-774679/
+
+[fn:2] http://baike.baidu.com/view/11854949.htm
+
+[fn:3] https://github.com/dsdshcym/Database-Query-Optimization
