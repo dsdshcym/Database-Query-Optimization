@@ -26,6 +26,27 @@
    2) 无法优化
 
       查询所有字段需遍历表中所有元组，无法再进一步优化了
+
+2. 查询所有小类
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select *
+        from small_cate_id_small_cate;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+--------------------------+------+---------------+------+---------+------+------+-------+
+        | id | select_type | table                    | type | possible_keys | key  | key_len | ref  | rows | Extra |
+        +----+-------------+--------------------------+------+---------------+------+---------+------+------+-------+
+        |  1 | SIMPLE      | small_cate_id_small_cate | ALL  | NULL          | NULL | NULL    | NULL |   37 | NULL  |
+        +----+-------------+--------------------------+------+---------------+------+---------+------+------+-------+
+        1 row in set (0.03 sec)
+      #+END_EXAMPLE
+
+   2) 无法优化
+
+      查询所有字段需遍历表中所有元组，无法再进一步优化了
 *** 查询表中的指定字段
 1. 查询所有店铺的名称
    1) 原查询
@@ -45,6 +66,27 @@
       #+END_EXAMPLE
 
       可见 rows 为 963
+
+   2) 无法优化
+
+      该查询需遍历表中所有元组，无法再进一步优化了
+
+2. 查询优惠表中的所有团购信息
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select group_info
+        from discount;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+----------+------+---------------+------+---------+------+------+-------+
+        | id | select_type | table    | type | possible_keys | key  | key_len | ref  | rows | Extra |
+        +----+-------------+----------+------+---------------+------+---------+------+------+-------+
+        |  1 | SIMPLE      | discount | ALL  | NULL          | NULL | NULL    | NULL | 1000 | NULL  |
+        +----+-------------+----------+------+---------------+------+---------+------+------+-------+
+        1 row in set (0.00 sec)
+      #+END_EXAMPLE
 
    2) 无法优化
 
@@ -72,6 +114,42 @@
    2) 无法优化
 
       该查询需遍历表中所有元组，无法再进一步优化了
+
+2. 查询所有地图类型
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select distinct map_type
+        from map_info;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+----------+------+---------------+------+---------+------+------+-----------------+
+        | id | select_type | table    | type | possible_keys | key  | key_len | ref  | rows | Extra           |
+        +----+-------------+----------+------+---------------+------+---------+------+------+-----------------+
+        |  1 | SIMPLE      | map_info | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using temporary |
+        +----+-------------+----------+------+---------------+------+---------+------+------+-----------------+
+        1 row in set (0.00 sec)
+      #+END_EXAMPLE
+
+   2) 添加索引
+
+      #+BEGIN_SRC sql
+        create index index_map_type on map_info(map_type);
+      #+END_SRC
+
+      再次查询
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+----------+-------+----------------+----------------+---------+------+------+--------------------------+
+        | id | select_type | table    | type  | possible_keys  | key            | key_len | ref  | rows | Extra                    |
+        +----+-------------+----------+-------+----------------+----------------+---------+------+------+--------------------------+
+        |  1 | SIMPLE      | map_info | range | index_map_type | index_map_type | 1       | NULL |    5 | Using index for group-by |
+        +----+-------------+----------+-------+----------------+----------------+---------+------+------+--------------------------+
+        1 row in set (0.02 sec)
+      #+END_EXAMPLE
+
+      rows 变为 5 ，效率显著提高
 *** 条件查询各表主键的字段（单值查询或范围查询）
 1. 用一个精确的店编号去查找店铺信息
    1) 原查询
@@ -246,6 +324,79 @@
       #+END_SRC
 
       优化后 rows 变为 52 ，效率显著提高
+
+2. 通过 name 和 alias 查询 phone
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select phone from basic
+        where name = '巫山烤全鱼' and alias = '重庆鸡公煲';
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        | id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        |  1 | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL |  963 | Using where |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        1 row in set (0.00 sec)
+      #+END_EXAMPLE
+
+      可见 rows 为 963 ，有优化空间
+
+   2) 添加索引
+
+      #+BEGIN_SRC sql
+        create index index_name on basic(name);
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+---------------+------------+---------+-------+------+------------------------------------+
+        | id | select_type | table | type | possible_keys | key        | key_len | ref   | rows | Extra                              |
+        +----+-------------+-------+------+---------------+------------+---------+-------+------+------------------------------------+
+        |  1 | SIMPLE      | basic | ref  | index_name    | index_name | 150     | const |    3 | Using index condition; Using where |
+        +----+-------------+-------+------+---------------+------------+---------+-------+------+------------------------------------+
+        1 row in set (0.00 sec)
+      #+END_EXAMPLE
+
+      rows 降为 3
+
+      #+BEGIN_SRC sql
+        create index index_alias on basic(alias);
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+------------------------+-------------+---------+-------+------+------------------------------------+
+        | id | select_type | table | type | possible_keys          | key         | key_len | ref   | rows | Extra                              |
+        +----+-------------+-------+------+------------------------+-------------+---------+-------+------+------------------------------------+
+        |  1 | SIMPLE      | basic | ref  | index_name,index_alias | index_alias | 120     | const |    1 | Using index condition; Using where |
+        +----+-------------+-------+------+------------------------+-------------+---------+-------+------+------------------------------------+
+        1 row in set (0.07 sec)
+      #+END_EXAMPLE
+
+      rows 降为 1 ，效率显著提高
+
+   3) 更改查询语句顺序 + 索引
+
+      由于 alias 上大多为空值，重复率较低，可先查询 alias 再查询 name
+
+      #+BEGIN_SRC sql
+        create index index_alias on basic(alias);
+
+        explain select phone from basic
+        where alias = '重庆鸡公煲' and name = '巫山烤全鱼';
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+---------------+-------------+---------+-------+------+------------------------------------+
+        | id | select_type | table | type | possible_keys | key         | key_len | ref   | rows | Extra                              |
+        +----+-------------+-------+------+---------------+-------------+---------+-------+------+------------------------------------+
+        |  1 | SIMPLE      | basic | ref  | index_alias   | index_alias | 120     | const |    1 | Using index condition; Using where |
+        +----+-------------+-------+------+---------------+-------------+---------+-------+------+------------------------------------+
+        1 row in set (0.00 sec)
+      #+END_EXAMPLE
+
+      rows 降为 1 ，效率显著提高
 *** 用”in”进行条件查询
 1. 用几个 small_cate_id 来查询 shop_id
    1) 原查询
@@ -265,12 +416,12 @@
 
       可见 rows 为 76
 
-    2) 无需优化
+      1) 无需优化
 
-       因为 small_cate_id 已经是 small_cate_id_small_cate 表的主键，已有索引，故
-       无需优化。
+         因为 small_cate_id 已经是 small_cate_id_small_cate 表的主键，已有索引，故
+         无需优化。
 *** 一个表中 group by、order by、having 联合条件查询
-1. 实际应用中会出现按平均价格来查询的情况
+1. 按平均价格来查询
    1) 原查询
 
       #+BEGIN_SRC sql
@@ -352,6 +503,31 @@
       #+END_SRC
 
       可见 rows 变为 1 * 1 ，效率显著提高
+
+2. 查询某小类下的所有商铺名
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select B.shop_id, B.name
+        from basic as B, shop_id_small_cate_id as SS
+        where B.shop_id = SS.shop_id and SS.small_cate_id = 'g101';
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+--------+-----------------------+---------------+---------+-----------------+------+--------------------------+
+        | id | select_type | table | type   | possible_keys         | key           | key_len | ref             | rows | Extra                    |
+        +----+-------------+-------+--------+-----------------------+---------------+---------+-----------------+------+--------------------------+
+        |  1 | SIMPLE      | SS    | ref    | PRIMARY,small_cate_id | small_cate_id | 18      | const           |   32 | Using where; Using index |
+        |  1 | SIMPLE      | B     | eq_ref | PRIMARY               | PRIMARY       | 4       | test.SS.shop_id |    1 | NULL                     |
+        +----+-------------+-------+--------+-----------------------+---------------+---------+-----------------+------+--------------------------+
+        2 rows in set (0.01 sec)
+      #+END_EXAMPLE
+
+      rows 为 32 * 1
+
+   2) 无需优化
+
+      因为 small_cate_id 和 shop_id 都是主键，已有索引，故无需优化
 *** join 查询
 1. 利用拼音查询城市名
    1) 原查询
@@ -397,6 +573,32 @@
       #+END_SRC
 
       rows 变为 1 * 1 ，效率显著提高
+
+2. 获取所有商铺的图片
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select B.shop_id, D.photos
+        from basic as B
+        inner join dazhong as D
+        where B.shop_id = D.shop_id;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+        | id | select_type | table | type   | possible_keys | key     | key_len | ref            | rows | Extra       |
+        +----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+        |  1 | SIMPLE      | D     | ALL    | PRIMARY       | NULL    | NULL    | NULL           |  939 | NULL        |
+        |  1 | SIMPLE      | B     | eq_ref | PRIMARY       | PRIMARY | 4       | test.D.shop_id |    1 | Using index |
+        +----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+        2 rows in set (0.43 sec)
+      #+END_EXAMPLE
+
+      可见 rows 为 939 * 1
+
+   2) 无法优化
+
+      因为每个商铺的图片地址均不相同，故读取所有地址需要遍历全表，无法优化
 *** 存在量词（exists）查询
 1. 查询产品评价高于 9 的 shop_id, name
    1) 原查询
@@ -606,6 +808,8 @@
 
       在实际应用 count 语句时，使用 =count(*)= 将比 count(/具体键值/) 快。因为
       =count(*)= 利用的是主键索引[fn:1]。
+*** 其他查询
+1. Like 语句
 * Footnotes
 
 [fn:1] http://blog.itpub.net/22664653/viewspace-774679/
