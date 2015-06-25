@@ -1,3 +1,22 @@
+* 配置信息
+- System Information
+  - Manufacturer: Dell Inc.
+  - Product Name: Inspiron 620
+- OS
+
+  Ubuntu 14.04.2 LTS
+
+- CPU
+
+  Intel(R) Core(TM) i5-2320 CPU @ 3.00GHz
+
+- Memory
+
+  4 GB 1333 MHz
+
+- Hard Drive
+
+  1 TB 7200 rpm
 * 查询优化
 ** 单表操作
 *** 查询表中的所有字段
@@ -242,7 +261,6 @@
 
       可见 rows 已经变为 1，是优化前的0.1%
 2. 查找人均消费在某一范围内的的店铺名称
-
    1) 原查询
 
       比如查找 base 中 avg\_price<50 的结果
