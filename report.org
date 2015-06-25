@@ -661,6 +661,81 @@ CLOCK: [2015-06-08 Mon 18:56]--[2015-06-08 Mon 20:36] =>  1:40
       #+END_EXAMPLE
 
       rows 降为 1 ，效率显著提高
+
+3. 用店名和人均消费值来查找店铺信息
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select *
+        from basic
+        where name='林师傅' and avg_price=12;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        | id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        | 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        1 rows in set (0.05 sec)
+      #+END_EXAMPLE
+
+      可见 rows 为 963
+   2) 添加索引
+
+      #+BEGIN_SRC sql
+        create index index_name on basic(avg_price,name);
+      #+END_SRC
+   3) 优化后
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+        | id | select_type | table | type | possible_keys | key        | key_len | ref         | rows | Extra                 |
+        +----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+        | 1  | SIMPLE      | basic | ref  | index_name    | index_name | 152     | const,const | 1    | Using index condition |
+        +----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+        1 rows in set (0.04 sec)
+      #+END_EXAMPLE
+
+      可见 rows 已经变为 1 ,是优化前的 0.1%
+
+4. 查找特定店名但人均消费在一定范围的店铺名称
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select name
+        from basic
+        where name='林师傅' and avg_price<50;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        | id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        | 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using where |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        1 rows in set (0.04 sec)
+      #+END_EXAMPLE
+
+      可见 rows 为 1000
+
+   2) 添加索引
+
+      #+BEGIN_SRC sql
+        create index index_name_price on basic(avg_price,name);
+      #+END_SRC
+
+   3) 优化后
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+        | id | select_type | table | type  | possible_keys    | key              | key_len | ref  | rows | Extra                    |
+        +----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+        | 1  | SIMPLE      | basic | range | index_name_price | index_name_price | 2       | NULL | 617  | Using where; Using index |
+        +----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+      #+END_EXAMPLE
+
+      可见 rows 已经变为 617 ，是优化前的 61.7%
 **** 用”in”进行条件查询
 1. 用几个 small_cate_id 来查询 shop_id
    1) 原查询
@@ -680,11 +755,52 @@ CLOCK: [2015-06-08 Mon 18:56]--[2015-06-08 Mon 20:36] =>  1:40
 
       可见 rows 为 76
 
-      1) 无需优化
+   2) 无需优化
 
-         因为 small_cate_id 已经是 small_cate_id_small_cate 表的主键，已有索引，故
-         无需优化。
+      因为 small_cate_id 已经是 small_cate_id_small_cate 表的主键，已有索引，故
+      无需优化。
+
+2. 查找符合某几个店名的店铺
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select *
+        from basic
+        where name in ('真好味','阿姨布丁','青春学堂');
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        | id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        | 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
+        +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+        1 rows in set (0.05 sec)
+      #+END_EXAMPLE
+
+      可见 rows 为 963
+   2) 添加索引
+
+      #+BEGIN_SRC sql
+        create index index_name on basic(name);
+      #+END_SRC
+
+   3) 优化后
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+        | id | select_type | table | type  | possible_keys | key        | key_len | ref  | rows | Extra                 |
+        +----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+        | 1  | SIMPLE      | basic | range | index_name    | index_name | 150     | NULL | 3    | Using index condition |
+        +----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+        1 rows in set (0.04 sec)
+      #+END_EXAMPLE
+
+      可见 rows 已经变为 3 ,是优化前的 0.3%
 **** 一个表中 group by、order by、having 联合条件查询
+:PROPERTIES:
+:ID:       C9E2CCB4-BE3A-4940-A2FF-93FD1BD990E5
+:END:
 1. 按平均价格来查询
    1) 原查询
 
@@ -723,6 +839,48 @@ CLOCK: [2015-06-08 Mon 18:56]--[2015-06-08 Mon 20:36] =>  1:40
         -- +----+-------------+-------+-------+---------------+-------------+---------+------+------+-----------------------+
         -- 1 row in set (0.04 sec)
       #+END_SRC
+
+2. remark 表分组排序筛选查找
+   1) 原查询
+
+      将 remark 按环境评分 environment_rating 分组,筛选出食品评分 product_rating
+      > 7 的餐馆, 并且按平均评价数量 all_remarks 排序
+
+      #+BEGIN_SRC sql
+        explain select shop_id,environment_rating,product_rating,all_remarks
+        from remark
+        group by environment_rating
+        having product_rating>7
+        order by all_remarks;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+        | id | select_type | table  | type | possible_keys | key  | key_len | ref  | rows | Extra                           |
+        +----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+        | 1  | SIMPLE      | remark | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using temporary; Using filesort |
+        +----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+        1 rows in set (0.03 sec)
+      #+END_EXAMPLE
+
+      可见 rows 为 1000
+   2) 添加索引
+
+      #+BEGIN_SRC sql
+        create index index_environment_rating,product_rating,all_remarks on remark(environment_rating,product_rating,all_remarks);
+      #+END_SRC
+   3) 优化后
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+        | id | select_type | table  | type  | possible_keys | key     | key_len | ref  | rows | Extra                                                     |
+        +----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+        | 1  | SIMPLE      | remark | range | index_1       | index_1 | 5       | NULL | 84   | Using index for group-by; Using temporary; Using filesort |
+        +----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+        1 rows in set (0.06 sec)
+      #+END_EXAMPLE
+
+      可见 rows 已经变为 84 ,是优化前的 0.84%
 *** 复合查询
 **** 多表联合查询
 1. 查询某 city 的所有 shop_id
@@ -792,6 +950,45 @@ CLOCK: [2015-06-08 Mon 18:56]--[2015-06-08 Mon 20:36] =>  1:40
    2) 无需优化
 
       因为 small_cate_id 和 shop_id 都是主键，已有索引，故无需优化
+
+3. 寻找平均价格低于 20 元且食物评分高于 8 的店铺
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select basic.name,basic.avg_price,remark.product_rating
+        from basic,remark
+        where basic.shop_id=remark.shop_id and basic.avg_price<20 and remark.product_rating>8;
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+        | id | select_type | table  | type   | possible_keys | key     | key_len | ref                | rows | Extra       |
+        +----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+        | 1  | SIMPLE      | basic  | ALL    | PRIMARY       | NULL    | NULL    | NULL               | 1000 | Using where |
+        | 1  | SIMPLE      | remark | eq_ref | PRIMARY       | PRIMARY | 4       | test.basic.shop_id | 1    | Using where |
+        +----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+        2 rows in set (0.06 sec)
+      #+END_EXAMPLE
+
+      可见 rows 分别为 1000, 1
+   2) 添加索引
+
+      #+BEGIN_SRC sql
+        create index index_avg_price on basic(avg_price);
+      #+END_SRC
+   3) 优化后
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+        | id | select_type | table  | type   | possible_keys           | key             | key_len | ref                | rows | Extra                 |
+        +----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+        | 1  | SIMPLE      | basic  | range  | PRIMARY,index_avg_price | index_avg_price | 2       | NULL               | 235  | Using index condition |
+        | 1  | SIMPLE      | remark | eq_ref | PRIMARY                 | PRIMARY         | 4       | test.basic.shop_id | 1    | Using where           |
+        +----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+        2 rows in set (0.05 sec)
+      #+END_EXAMPLE
+
+      可见 rows 已经变为 235, 1 ，是优化前的 23.5%
 **** join 查询
 1. 利用拼音查询城市名
    1) 原查询
