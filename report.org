@@ -124,9 +124,148 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
 
 利用数据库中已有的表信息，从 csv 文件中提取出相应的数据载入到数据库中。（因此只
 需要完成表的设计即能自动录入，即便表结构变化也不会受到影响）
-* 查询优化
-** 单表操作
-*** 查询表中的所有字段
+* 实验内容
+** 垂直分割
+*** 数据含义分析
+结合 csv 文件中的数据名和数据值得含义如下：
+**** DONE 标签分析
+CLOSED: [2015-05-25 Mon 19:07]
+:LOGBOOK:
+- State "DONE"       from ""           [2015-05-25 Mon 19:07]
+:END:
+- shop_id :: 编号
+- name :: 店名
+- alias :: 又名
+- province :: 省份
+- city :: 城市
+- city_pinyin :: 城市拼音
+- city_id :: 城市编号
+- area :: 城区
+- big_cate :: 大类
+- big_cate_id :: 大类编号
+- small_cate :: 小类
+- small_cate_id :: 小类编号
+- address :: 地址
+- business_area :: 商区
+- phone :: 电话
+- hours :: 开业时间
+- avg_price :: 平均价格
+- stars :: 星级
+- photos :: 照片
+- description :: 描述
+- tags :: 标签
+- map_type :: 地图类型
+- original_latitude :: 原始纬度
+- original_longitude :: 原始经度
+- google_longitude :: 谷歌经度
+- google_latitude :: 谷歌纬度
+- navigation :: 导航
+- traffic :: 交通
+- atmosphere :: 气氛
+- characteristics :: 特色
+- payment :: 付款
+- product_rating :: 产品评价
+- environment_rating :: 环境评价
+- service_rating :: 服务评价
+- all_remarks :: 所有评价数
+- very_good_remarks :: 「非常好」评价数
+- good_remarks :: 「好」评价数
+- common_remarks :: 「一般」评价数
+- bad_remarks :: 「差」评价数
+- very_bad_remarks :: 「非常差」评价数
+- recommended_dishes :: 推荐菜品
+- nearby_shops :: 附近商铺
+- is_chains :: 是连锁店
+- group :: 团购
+- card :: 优惠券
+*** DONE 分割
+CLOSED: [2015-06-25 Thu 20:11]
+:LOGBOOK:
+- State "DONE"       from "NEXT"       [2015-06-25 Thu 20:11]
+CLOCK: [2015-06-08 Mon 18:56]--[2015-06-08 Mon 20:36] =>  1:40
+:END:
+分析后分为 14 个表，如下：
+- 基本信息 (basic)
+  - _shop_id_ :: 编号
+  - name :: 店名
+  - alias :: 又名
+  - address :: 地址
+  - phone :: 电话
+  - hours :: 开业时间
+  - avg_price :: 平均价格
+  - payment :: 付款
+  - is_chains :: 是连锁店
+- 城市相关
+  - 所在地 (shop_id_area)
+    - _shop_id_ :: 编号
+    - area :: 城区
+    - business_area :: 商区
+  - 店-城市 (shop_id_city_id)
+    - _shop_id_ :: 编号
+    - _city_id_ :: 城市编号
+  - 城市 (city_id_city)
+    - _city_id_ :: 城市编号
+    - city :: 城市
+  - 城市、城市拼音 (city_id_city_pinyin)
+    - _city_id_ :: 城市编号
+    - city_pinyin :: 城市拼音
+  - 城市、省份 (city_id_province)
+    - _city_id_ :: 城市编号
+    - province :: 省份
+- 分类
+  - 编号-小类 (shop_id_small_cate_id)
+    - _shop_id_ :: 编号
+    - small_cate :: 小类
+  - 小类 (small_cate_id_small_cate)
+    - _small_cate_id_ :: 小类编号
+    - small_cate :: 小类
+  - 编号-大类 (shop_id_big_cate_id)
+    - _shop_id_ :: 编号
+    - small_cate :: 大类
+  - 大类 (big_cate_id_big_cate)
+    - _big_cate_id_ :: 大类编号
+    - big_cate :: 大类
+- 地图类型 (map_info)
+  - _shop_id_ :: 编号
+  - map_type :: 地图类型
+  - original_latitude :: 原始纬度
+  - original_longitude :: 原始经度
+  - google_longitude :: 谷歌经度
+  - google_latitude :: 谷歌纬度
+  - traffic :: 交通
+- 大众相关 (dazhong)
+  - _shop_id_ :: 编号
+  - navigation :: 网站导航
+  - recommended_dishes :: 推荐菜品
+  - characteristics :: 特色
+  - stars :: 星级
+  - photos :: 照片
+  - description :: 描述
+  - tags :: 标签
+  - atmosphere :: 气氛
+  - nearby_shops :: 附近商铺
+- 评价 (remark)
+  - _shop_id_ :: 编号
+  - product_rating     :: 产品评价
+  - environment_rating :: 环境评价
+  - service_rating     :: 服务评价
+  - all_remarks        :: 所有评价数
+  - very_good_remarks  :: 「非常好」评价数
+  - good_remarks       :: 「好」评价数
+  - common_remarks     :: 「一般」评价数
+  - bad_remarks        :: 「差」评价数
+  - very_bad_remarks   :: 「非常差」评价数
+- 优惠 (discount)
+  - _shop_id_ :: 编号
+  - group :: 团购
+  - card :: 优惠券
+*** 建表语句
+见本项目 Github 页面[fn:4]
+
+其中所有 Char, Float 变量均为定长，保证效率[fn:5]
+** 查询优化
+*** 单表操作
+**** 查询表中的所有字段
 1. 查询 basic 表
    1) 原查询
 
@@ -173,7 +312,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
    2) 无法优化
 
       查询所有字段需遍历表中所有元组，无法再进一步优化了
-*** 查询表中的指定字段
+**** 查询表中的指定字段
 1. 查询所有店铺的名称
    1) 原查询
 
@@ -217,7 +356,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
    2) 无法优化
 
       该查询需遍历表中所有元组，无法再进一步优化了
-*** 查询表中没有重复的字段（distinct）的使用
+**** 查询表中没有重复的字段（distinct）的使用
 1. 查询不重名的所有店铺名称
    1) 原查询
 
@@ -276,7 +415,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
       #+END_EXAMPLE
 
       rows 变为 5 ，效率显著提高
-*** 条件查询各表主键的字段（单值查询或范围查询）
+**** 条件查询各表主键的字段（单值查询或范围查询）
 1. 用一个精确的店编号去查找店铺信息
    1) 原查询
 
@@ -327,7 +466,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
     2) 无需优化
 
        因为表创建时已经自带以主键为关键值的索引，无需优化
-*** 条件查询各表中普通字段（单值查询或范围查询）
+**** 条件查询各表中普通字段（单值查询或范围查询）
 1. 用店名来查找店铺信息
    1) 原查询
       比如查找 base 中 name 为「林师傅」的结果
@@ -407,7 +546,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
       #+END_EXAMPLE
 
       可见 rows 已经变为617,是优化前的64%
-*** 一个表中多个字段条件查询（单值查询或范围查询）
+**** 一个表中多个字段条件查询（单值查询或范围查询）
 1. 多条件查询 remark 表中的 shop_id
    1) 原查询
 
@@ -522,7 +661,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
       #+END_EXAMPLE
 
       rows 降为 1 ，效率显著提高
-*** 用”in”进行条件查询
+**** 用”in”进行条件查询
 1. 用几个 small_cate_id 来查询 shop_id
    1) 原查询
 
@@ -545,7 +684,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
 
          因为 small_cate_id 已经是 small_cate_id_small_cate 表的主键，已有索引，故
          无需优化。
-*** 一个表中 group by、order by、having 联合条件查询
+**** 一个表中 group by、order by、having 联合条件查询
 1. 按平均价格来查询
    1) 原查询
 
@@ -584,8 +723,8 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
         -- +----+-------------+-------+-------+---------------+-------------+---------+------+------+-----------------------+
         -- 1 row in set (0.04 sec)
       #+END_SRC
-** 复合查询
-*** 多表联合查询
+*** 复合查询
+**** 多表联合查询
 1. 查询某 city 的所有 shop_id
    1) 原查询
 
@@ -653,7 +792,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
    2) 无需优化
 
       因为 small_cate_id 和 shop_id 都是主键，已有索引，故无需优化
-*** join 查询
+**** join 查询
 1. 利用拼音查询城市名
    1) 原查询
 
@@ -724,7 +863,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
    2) 无法优化
 
       因为每个商铺的图片地址均不相同，故读取所有地址需要遍历全表，无法优化
-*** 存在量词（exists）查询
+**** 存在量词（exists）查询
 1. 查询产品评价高于 9 的 shop_id, name
    1) 原查询
 
@@ -774,7 +913,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
       #+END_SRC
 
       经过添加索引和改为 join 查询后， rows 变为 5 * 1 ，效率显著提高
-*** 嵌套子查询（select ... from (select ...)）
+**** 嵌套子查询（select ... from (select ...)）
 1. 查找 stars 大于 4.0 的 shop_id
    1) 原查询
 
@@ -831,8 +970,8 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
       #+END_SRC
 
       经过添加索引、改为非嵌套查询优化后， rows 降为 86 ，效率显著提高
-** 其他查询
-*** 向表中插入记录
+*** 其他查询
+**** 向表中插入记录
 1. 直接向 city_id_city 中插入新元组
    1) 原查询
 
@@ -849,7 +988,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
       #+END_SRC
 
       直接插入无需优化
-*** 删除记录
+**** 删除记录
 1. 直接将 city_id_city 中的一项删除
    1) 原查询
 
@@ -909,7 +1048,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
       #+END_SRC
 
       rows 也为 1 ，效率显著提高
-*** 聚集函数
+**** 聚集函数
 1. 统计某城市中有多少商铺
    1) 原查询
 
@@ -933,7 +1072,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
 
       在实际应用 count 语句时，使用 =count(*)= 将比 count(/具体键值/) 快。因为
       =count(*)= 利用的是主键索引[fn:1]。
-*** 其他查询
+**** 其他查询
 1. Like 语句
 * Footnotes
 
@@ -942,3 +1081,7 @@ Docker 是一个开源的应用容器引擎，让开发者可以打包他们的�
 [fn:2] http://baike.baidu.com/view/11854949.htm
 
 [fn:3] https://github.com/dsdshcym/Database-Query-Optimization
+
+[fn:4] https://github.com/dsdshcym/Database-Query-Optimization/blob/master/init.sql
+
+[fn:5] http://coolshell.cn/articles/1846.html 第 15 条
