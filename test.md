@@ -184,4 +184,207 @@ create index index_name_price on basic(avg_price,name);
 1 rows in set (0.05 sec)
 ```
 
-可见 rows 已经变为617,是优化前的64%
+可见 rows 已经变为 617 ,是优化前的 64%
+
+## 一个表中多个字段条件查询(单值查询或范围查询)
+### A
+实际应用中会出现用店名和人均消费值来查找店铺信息的情况,比如查找 base 中 name 为“林师傅”且 avg_price=12 的结果
+```sql
+explain select *
+from basic
+where name='林师傅' and avg_price=12;
+```
+
+```
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.05 sec)
+```
+
+可见 rows 为 963
+
+经过优化:对 avg_price,name 进行索引
+```sql
+create index index_name on basic(avg_price,name);
+```
+
+再次查找
+
+```
++----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+| id | select_type | table | type | possible_keys | key        | key_len | ref         | rows | Extra                 |
++----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+| 1  | SIMPLE      | basic | ref  | index_name    | index_name | 152     | const,const | 1    | Using index condition |
++----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+1 rows in set (0.04 sec)
+```
+
+可见 rows 已经变为 1 ,是优化前的 0.1%
+
+
+### B
+实际应用中会出现查找店名和人均消费范围的店铺名称的情况,比如查找 base 中 avg_price<50 的结果
+```sql
+explain select name
+from basic
+where name='林师傅' and avg_price<50;
+```
+
+```
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.04 sec)
+```
+
+可见 rows 为 1000
+
+经过优化:对 avg_price,name 进行索引
+```sql
+create index index_name_price on basic(avg_price,name);
+```
+
+再次查找
+
+```
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+| id | select_type | table | type  | possible_keys    | key              | key_len | ref  | rows | Extra                    |
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+| 1  | SIMPLE      | basic | range | index_name_price | index_name_price | 2       | NULL | 617  | Using where; Using index |
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+1 rows in set (0.05 sec)
+```
+
+可见 rows 已经变为 617 ，是优化前的 61.7%
+
+## 用"in"条件进行查询
+### A
+实际应用中会出现查找几个店名的店铺的情况,比如查找 base 中 name 包含于 {真好味,阿姨布丁,青春学堂} 中的结果
+
+```sql
+explain select *
+from basic
+where name in ('真好味','阿姨布丁','青春学堂');
+```
+
+```
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.05 sec)
+```
+
+可见 rows 为 963
+
+经过优化:对 name 进行索引
+
+```sql
+create index index_name on basic(name);
+```
+
+再次查找
+
+```
++----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+| id | select_type | table | type  | possible_keys | key        | key_len | ref  | rows | Extra                 |
++----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+| 1  | SIMPLE      | basic | range | index_name    | index_name | 150     | NULL | 3    | Using index condition |
++----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+1 rows in set (0.04 sec)
+```
+
+可见 rows 已经变为 3 ,是优化前的 0.3%
+
+## 一个表中 group by,order by,having 联合查询
+### A
+实际应用中会出现分组排序筛选查找的情况,比如将 remark 按环境评分 environment_rating 分组,筛选出食品评分 product_rating > 7 的餐馆, 并且按平均评价数量 all_remarks 排序
+
+```sql
+explain select shop_id,environment_rating,product_rating,all_remarks
+from remark
+group by environment_rating
+having product_rating>7
+order by all_remarks;
+```
+
+```
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+| id | select_type | table  | type | possible_keys | key  | key_len | ref  | rows | Extra                           |
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+| 1  | SIMPLE      | remark | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using temporary; Using filesort |
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+1 rows in set (0.03 sec)
+```
+
+可见 rows 为 1000
+
+经过优化:对 environment_rating,product_rating,all_remarks 进行索引
+
+```sql
+create index index_environment_rating,product_rating,all_remarks on remark(environment_rating,product_rating,all_remarks);
+```
+
+再次查找
+
+```
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+| id | select_type | table  | type  | possible_keys | key     | key_len | ref  | rows | Extra                                                     |
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+| 1  | SIMPLE      | remark | range | index_1       | index_1 | 5       | NULL | 84   | Using index for group-by; Using temporary; Using filesort |
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+1 rows in set (0.06 sec)
+```
+
+可见 rows 已经变为 84 ,是优化前的 0.84%
+
+
+# 复合查询
+
+## 多表联合查询
+
+### A
+实际情况中会出现多表联合查询的情况，比如寻找平均价格低于 20 元且食物评分高于 8 的店铺
+
+```sql
+explain select basic.name,basic.avg_price,remark.product_rating
+from basic,remark
+where basic.shop_id=remark.shop_id and basic.avg_price<20 and remark.product_rating>8;
+```
+
+```
++----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+| id | select_type | table  | type   | possible_keys | key     | key_len | ref                | rows | Extra       |
++----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+| 1  | SIMPLE      | basic  | ALL    | PRIMARY       | NULL    | NULL    | NULL               | 1000 | Using where |
+| 1  | SIMPLE      | remark | eq_ref | PRIMARY       | PRIMARY | 4       | test.basic.shop_id | 1    | Using where |
++----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+2 rows in set (0.06 sec)
+```
+
+可见 rows 分别为 1000,1
+
+经过优化:对 basic.avg_price, 进行索引
+
+```sql
+create index index_avg_price on basic(avg_price);
+```
+再次查找
+
+```
++----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+| id | select_type | table  | type   | possible_keys           | key             | key_len | ref                | rows | Extra                 |
++----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+| 1  | SIMPLE      | basic  | range  | PRIMARY,index_avg_price | index_avg_price | 2       | NULL               | 235  | Using index condition |
+| 1  | SIMPLE      | remark | eq_ref | PRIMARY                 | PRIMARY         | 4       | test.basic.shop_id | 1    | Using where           |
++----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+2 rows in set (0.05 sec)
+```
+
+可见 rows 已经变为 235,1 ,是优化前的 23.5%
