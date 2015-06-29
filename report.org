@@ -1167,6 +1167,52 @@ CLOCK: [2015-06-08 Mon 18:56]--[2015-06-08 Mon 20:36] =>  1:40
       #+END_SRC
 
       经过添加索引、改为非嵌套查询优化后， rows 降为 86 ，效率显著提高
+
+2. 查找所有位于杨浦区的店铺 id 和名称与平均价格
+
+   1) 原查询
+
+      #+BEGIN_SRC sql
+        explain select shop_id,name,avg_price
+        from basic
+        where shop_id in(select shop_id
+        from shop_id_area
+        where area='杨浦区');
+      #+END_SRC
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+--------------+--------+---------------+---------+---------+---------------------------+------+-------------+
+        | id | select_type | table        | type   | possible_keys | key     | key_len | ref                       | rows | Extra       |
+        +----+-------------+--------------+--------+---------------+---------+---------+---------------------------+------+-------------+
+        | 1  | SIMPLE      | shop_id_area | ALL    | PRIMARY       | NULL    | NULL    | NULL                      | 1000 | Using where |
+        | 1  | SIMPLE      | basic        | eq_ref | PRIMARY       | PRIMARY | 4       | test.shop_id_area.shop_id | 1    | NULL        |
+        +----+-------------+--------------+--------+---------------+---------+---------+---------------------------+------+-------------+
+        2 rows in set (0.04 sec)
+      #+END_EXAMPLE
+
+      可见 rows 分别为 1000,1
+
+   2) 添加索引
+
+      对 shop_id_area 的 area 进行索引
+
+      #+BEGIN_SRC sql
+        create index index_shop_id_area on shop_id_area(area);
+      #+END_SRC
+
+   3) 优化后
+
+      #+BEGIN_EXAMPLE
+        +----+-------------+--------------+--------+----------------------------+--------------------+---------+---------------------------+------+--------------------------+
+        | id | select_type | table        | type   | possible_keys              | key                | key_len | ref                       | rows | Extra                    |
+        +----+-------------+--------------+--------+----------------------------+--------------------+---------+---------------------------+------+--------------------------+
+        | 1  | SIMPLE      | shop_id_area | ref    | PRIMARY,index_shop_id_area | index_shop_id_area | 120     | const                     | 19   | Using where; Using index |
+        | 1  | SIMPLE      | basic        | eq_ref | PRIMARY                    | PRIMARY            | 4       | test.shop_id_area.shop_id | 1    | NULL                     |
+        +----+-------------+--------------+--------+----------------------------+--------------------+---------+---------------------------+------+--------------------------+
+        2 rows in set (0.03 sec)
+      #+END_EXAMPLE
+
+      可见 rows 已经变为 19, 1 ，是优化前的 1.9%
 *** 其他查询
 **** 向表中插入记录
 1. 直接向 city_id_city 中插入新元组
@@ -1271,6 +1317,54 @@ CLOCK: [2015-06-08 Mon 18:56]--[2015-06-08 Mon 20:36] =>  1:40
       =count(*)= 利用的是主键索引[fn:1]。
 **** 其他查询
 1. Like 语句
+   1. 查找所有星巴克的分店
+      1) 原查询
+
+         #+BEGIN_SRC sql
+           explain select shop_id,name
+           from basic
+           where name like '星巴克%';
+         #+END_SRC
+
+         #+BEGIN_EXAMPLE
+           +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+           | id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
+           +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+           | 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
+           +----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+           1 rows in set (0.03 sec)
+         #+END_EXAMPLE
+
+         可见 rows 为 963
+
+      2) 添加索引
+
+         #+BEGIN_SRC sql
+           create index index_name on basic(name);
+         #+END_SRC
+
+      3) 优化后
+
+         #+BEGIN_EXAMPLE
+           +----+-------------+-------+-------+---------------+------------+---------+------+------+--------------------------+
+           | id | select_type | table | type  | possible_keys | key        | key_len | ref  | rows | Extra                    |
+           +----+-------------+-------+-------+---------------+------------+---------+------+------+--------------------------+
+           | 1  | SIMPLE      | basic | range | index_name    | index_name | 150     | NULL | 6    | Using where; Using index |
+           +----+-------------+-------+-------+---------------+------------+---------+------+------+--------------------------+
+           1 rows in set (0.03 sec)
+         #+END_EXAMPLE
+
+         可见 rows 已经变为 6 ,是优化前的 0.6%
+
+      4) 优化查询语句
+
+         将 Like 查询转化为范围查询效率更高 （「兌」是「克」在 utf-8 编码下的后一位）
+
+         #+BEGIN_SRC sql
+           select shop_id, name
+           from basic
+           where name>'星巴克' and name<'星巴兌';
+         #+END_SRC
 * Footnotes
 
 [fn:1] http://blog.itpub.net/22664653/viewspace-774679/

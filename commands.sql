@@ -156,3 +156,16 @@ where city_id = 1001 and city = 'test';
 explain select count(city_id)
 from shop_id_city_id
 where city_id = 1;
+
+#----------------------------------------------------------
+
+explain select shop_id,name
+from basic
+where name like '星巴克%';
+
+explain select shop_id, name
+from basic
+where name>='星巴克' and name<'星巴兌';
+
+create index index_name on basic(name);
+drop index index_name on basic;
