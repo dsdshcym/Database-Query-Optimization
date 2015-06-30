@@ -1,0 +1,1707 @@
+% Created 2015-06-30 Tue 20:27
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{fixltx2e}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{float}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{marvosym}
+\usepackage{wasysym}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\tolerance=1000
+\usepackage{color}
+\usepackage{listings}
+\usepackage{minted}
+\usepackage{xeCJK}
+\setCJKmainfont{SHS UI PRChinaGB}
+\setmainfont{Helvetica}
+\usepackage[a3paper, margin=2cm]{geometry}
+\setcounter{secnumdepth}{3}
+
+\makeatletter
+\def\verbatim{\tiny\@verbatim \frenchspacing\@vobeyspaces \@xverbatim}
+\makeatother
+
+\author{陈一鸣 解子傲}
+\date{\today}
+\title{MYSQL 查询优化实验报告}
+\hypersetup{
+  pdfkeywords={},
+  pdfsubject={},
+  pdfcreator={Emacs 24.5.1 (Org mode 8.2.10)}}
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\section{概述}
+\label{sec-1}
+\subsection{主要目的}
+\label{sec-1-1}
+通过对不同情况下查询语句的执行分析，巩固和加深对查询和查询优化相关理论知识的理解，
+提高优化数据库系统的实践能力。
+\subsection{优化手段}
+\label{sec-1-2}
+主要用到的优化手段与工具如下，参考资料也一并列出
+\subsubsection{Explain}
+\label{sec-1-2-1}
+\begin{itemize}
+\item \href{http://cbb.sjtu.edu.cn/course/database/lab6.htm}{实验6：数据库查询优化与范式}
+\item \href{http://www.cnblogs.com/magialmoon/p/3439042.html}{MySQL优化—工欲善其事，必先利其器之EXPLAIN}
+\end{itemize}
+\subsubsection{建立索引}
+\label{sec-1-2-2}
+\begin{itemize}
+\item 课本内容
+\end{itemize}
+\subsubsection{优化语句}
+\label{sec-1-2-3}
+\begin{itemize}
+\item 课本内容
+\end{itemize}
+\subsubsection{慢查询日志}
+\label{sec-1-2-4}
+\begin{itemize}
+\item \href{http://www.cnblogs.com/zhanjindong/p/3472804.html#manchaxunrizhi}{MySQL优化—工欲善其事，必先利其器（2）慢查询部分}
+\end{itemize}
+\subsubsection{Percona Toolkit}
+\label{sec-1-2-5}
+\begin{itemize}
+\item \href{http://www.cnblogs.com/zhanjindong/p/3472804.html#PerconaToolkit}{MySQL优化—工欲善其事，必先利其器（2）Percona Toolkit 部分}
+\item \href{https://www.percona.com/doc/percona-toolkit/2.1/}{PERCONA TOOLKIT DOCUMENTATION}
+\end{itemize}
+\subsubsection{Docker}
+\label{sec-1-2-6}
+\begin{itemize}
+\item \href{https://www.docker.com}{Docker}
+\item \href{https://registry.hub.docker.com/_/mysql/}{Docker MySQL repository}
+\item \url{http://dockerpool.com/static/books/docker_practice/appendix_repo/mysql.html}
+\item \url{http://blog.flux7.com/blogs/docker/docker-tutorial-series-part-1-an-introduction}
+\end{itemize}
+\subsection{优化思路}
+\label{sec-1-3}
+由于本次实验的数据量较小，各种查询（嵌套查询除外）几乎都能在 0.1 秒以下的时间运
+行完毕，而这个时间很大程度还受到其他因素的影响（如：机器当前负载等）。而这么短的
+时间也无法进行慢查询日志的记录， Percona Toolkit 可以做到精确到纳秒，但仍要基于
+慢日志查询。故本次优化不以执行 SQL 语句的时间为标准，而是以 Explain 语句结果中的
+rows 指标为标准， rows 越小，认为效率越高。主要的优化手段也只用到了 \textbf{Explain},
+\textbf{Index} 和 \textbf{语句的优化} 。
+\subsubsection{优化过程}
+\label{sec-1-3-1}
+\begin{enumerate}
+\item Explain 原查询
+\item 结合 Explain 结果进行优化
+\item Explain 优化后的查询
+\end{enumerate}
+\section{实验环境}
+\label{sec-2}
+本次实验为了统一两人的环境，将实验环境搭建在了实验室内网的一台 PC 上，不仅如此，
+还将 MySQL 搭建在了 Docker 虚拟机中。每次实验前用 Python 脚本将数据库重置一遍，
+严格控制变量。（另：此处能用 DockerFile 进行初始化，但因初始化的同时要进行数据的
+初始化，故选择 Python 脚本）
+
+以下是实验环境的具体信息
+
+\subsection{PC 信息}
+\label{sec-2-1}
+\begin{itemize}
+\item System Information
+\begin{itemize}
+\item Manufacturer: Dell Inc.
+\item Product Name: Inspiron 620
+\end{itemize}
+\item OS
+
+Ubuntu 14.04.2 LTS
+
+\item CPU
+
+Intel(R) Core(TM) i5-2320 CPU @ 3.00GHz
+
+\item Memory
+
+4 GB 1333 MHz
+
+\item Hard Drive
+
+1 TB 7200 rpm
+\end{itemize}
+\subsection{Docker}
+\label{sec-2-2}
+\subsubsection{Docker 简介}
+\label{sec-2-2-1}
+Docker 是一个开源的应用容器引擎，让开发者可以打包他们的应用以及依赖包到一个可移
+植的容器中，然后发布到任何流行的 Linux 机器上，也可以实现虚拟化。容器是完全使用
+沙箱机制，相互之间不会有任何接口（类似 iPhone 的 app）。几乎没有性能开销,可以很
+容易地在机器和数据中心中运行。最重要的是，他们不依赖于任何语言、框架包括系统。\footnote{\url{http://baike.baidu.com/view/11854949.htm}}
+\subsubsection{Docker Mysql}
+\label{sec-2-2-2}
+以下是用 Docker 建立本次实验环境的语句（仅供参考）：
+\begin{itemize}
+\item Pull
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=sh,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+docker pull dl.dockerpool.com:5000/mysql:latest
+docker tag dl.dockerpool.com:5000/mysql:latest mysql:latest
+\end{lstlisting}
+\item Run
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=sh,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+docker run --name test-mysql -e MYSQL_ROOT_PASSWORD=123123 -p 3306:3306 -d mysql
+\end{lstlisting}
+\item Shell
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=sh,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+docker exec -it test-mysql bash
+\end{lstlisting}
+\end{itemize}
+\subsubsection{Docker info}
+\label{sec-2-2-3}
+本次 Docker 的运行环境
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=sh,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+docker info
+\end{lstlisting}
+
+\begin{verbatim}
+Storage Driver: aufs
+ Root Dir: /var/lib/docker/aufs
+ Backing Filesystem: extfs
+ Dirs: 29
+ Dirperm1 Supported: true
+Execution Driver: native-0.2
+Kernel Version: 3.16.0-38-generic
+Operating System: Ubuntu 14.04.2 LTS
+CPUs: 4
+Total Memory: 3.844 GiB
+\end{verbatim}
+\subsubsection{使用 Docker 的好处}
+\label{sec-2-2-4}
+\begin{enumerate}
+\item 多个 MySQL 实例并行
+
+可以同时在一台机上运行多个 Docker 实例（即多个 MySQL 实例），两个人可同时进行
+实验，且互不影响。
+
+\item 方便重置
+
+只用执行几段代码即可重新搭建出一个新的实验环境，结合 Python 脚本做到任意操作
+数据库都能轻松回到初始状态。
+
+\item 与本机隔离
+
+由于跑在虚拟机中，故不必担心影响到服务器本身的环境。
+\end{enumerate}
+\subsection{Python 脚本}
+\label{sec-2-3}
+详见本项目 Github 主页\footnote{\url{https://github.com/dsdshcym/Database-Query-Optimization}}
+\subsubsection{reset.py}
+\label{sec-2-3-1}
+
+调用 \texttt{init.sql} 中的 sql 语句将数据库重置。
+\subsubsection{update.py}
+\label{sec-2-3-2}
+
+利用数据库中已有的表信息，从 csv 文件中提取出相应的数据载入到数据库中。（因此只
+需要完成表的设计即能自动录入，即便表结构变化也不会受到影响）
+\section{实验内容}
+\label{sec-3}
+\subsection{垂直分割}
+\label{sec-3-1}
+\subsubsection{数据含义分析}
+\label{sec-3-1-1}
+结合 csv 文件中的数据名和数据值得含义如下：
+\begin{itemize}
+\item 标签分析
+\label{sec-3-1-1-1}
+\begin{description}
+\item[{shop\_id}] 编号
+\item[{name}] 店名
+\item[{alias}] 又名
+\item[{province}] 省份
+\item[{city}] 城市
+\item[{city\_pinyin}] 城市拼音
+\item[{city\_id}] 城市编号
+\item[{area}] 城区
+\item[{big\_cate}] 大类
+\item[{big\_cate\_id}] 大类编号
+\item[{small\_cate}] 小类
+\item[{small\_cate\_id}] 小类编号
+\item[{address}] 地址
+\item[{business\_area}] 商区
+\item[{phone}] 电话
+\item[{hours}] 开业时间
+\item[{avg\_price}] 平均价格
+\item[{stars}] 星级
+\item[{photos}] 照片
+\item[{description}] 描述
+\item[{tags}] 标签
+\item[{map\_type}] 地图类型
+\item[{original\_latitude}] 原始纬度
+\item[{original\_longitude}] 原始经度
+\item[{google\_longitude}] 谷歌经度
+\item[{google\_latitude}] 谷歌纬度
+\item[{navigation}] 导航
+\item[{traffic}] 交通
+\item[{atmosphere}] 气氛
+\item[{characteristics}] 特色
+\item[{payment}] 付款
+\item[{product\_rating}] 产品评价
+\item[{environment\_rating}] 环境评价
+\item[{service\_rating}] 服务评价
+\item[{all\_remarks}] 所有评价数
+\item[{very\_good\_remarks}] 「非常好」评价数
+\item[{good\_remarks}] 「好」评价数
+\item[{common\_remarks}] 「一般」评价数
+\item[{bad\_remarks}] 「差」评价数
+\item[{very\_bad\_remarks}] 「非常差」评价数
+\item[{recommended\_dishes}] 推荐菜品
+\item[{nearby\_shops}] 附近商铺
+\item[{is\_chains}] 是连锁店
+\item[{group}] 团购
+\item[{card}] 优惠券
+\end{description}
+\end{itemize}
+\subsubsection{分割}
+\label{sec-3-1-2}
+分析后分为 14 个表，如下（主键用下划线标出）
+\begin{itemize}
+\item 基本信息 (basic)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{name}] 店名
+\item[{alias}] 又名
+\item[{address}] 地址
+\item[{phone}] 电话
+\item[{hours}] 开业时间
+\item[{avg\_price}] 平均价格
+\item[{payment}] 付款
+\item[{is\_chains}] 是连锁店
+\end{description}
+\item 城市相关
+\begin{itemize}
+\item 所在地 (shop\_id\_area)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{area}] 城区
+\item[{business\_area}] 商区
+\end{description}
+\item 店-城市 (shop\_id\_city\_id)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{\uline{city\_id}}] 城市编号
+\end{description}
+\item 城市 (city\_id\_city)
+\begin{description}
+\item[{\uline{city\_id}}] 城市编号
+\item[{city}] 城市
+\end{description}
+\item 城市、城市拼音 (city\_id\_city\_pinyin)
+\begin{description}
+\item[{\uline{city\_id}}] 城市编号
+\item[{city\_pinyin}] 城市拼音
+\end{description}
+\item 城市、省份 (city\_id\_province)
+\begin{description}
+\item[{\uline{city\_id}}] 城市编号
+\item[{province}] 省份
+\end{description}
+\end{itemize}
+\item 分类
+\begin{itemize}
+\item 编号-小类 (shop\_id\_small\_cate\_id)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{small\_cate}] 小类
+\end{description}
+\item 小类 (small\_cate\_id\_small\_cate)
+\begin{description}
+\item[{\uline{small\_cate\_id}}] 小类编号
+\item[{small\_cate}] 小类
+\end{description}
+\item 编号-大类 (shop\_id\_big\_cate\_id)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{small\_cate}] 大类
+\end{description}
+\item 大类 (big\_cate\_id\_big\_cate)
+\begin{description}
+\item[{\uline{big\_cate\_id}}] 大类编号
+\item[{big\_cate}] 大类
+\end{description}
+\end{itemize}
+\item 地图类型 (map\_info)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{map\_type}] 地图类型
+\item[{original\_latitude}] 原始纬度
+\item[{original\_longitude}] 原始经度
+\item[{google\_longitude}] 谷歌经度
+\item[{google\_latitude}] 谷歌纬度
+\item[{traffic}] 交通
+\end{description}
+\item 大众相关 (dazhong)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{navigation}] 网站导航
+\item[{recommended\_dishes}] 推荐菜品
+\item[{characteristics}] 特色
+\item[{stars}] 星级
+\item[{photos}] 照片
+\item[{description}] 描述
+\item[{tags}] 标签
+\item[{atmosphere}] 气氛
+\item[{nearby\_shops}] 附近商铺
+\end{description}
+\item 评价 (remark)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{product\_rating    }] 产品评价
+\item[{environment\_rating}] 环境评价
+\item[{service\_rating    }] 服务评价
+\item[{all\_remarks       }] 所有评价数
+\item[{very\_good\_remarks }] 「非常好」评价数
+\item[{good\_remarks      }] 「好」评价数
+\item[{common\_remarks    }] 「一般」评价数
+\item[{bad\_remarks       }] 「差」评价数
+\item[{very\_bad\_remarks  }] 「非常差」评价数
+\end{description}
+\item 优惠 (discount)
+\begin{description}
+\item[{\uline{shop\_id}}] 编号
+\item[{group}] 团购
+\item[{card}] 优惠券
+\end{description}
+\end{itemize}
+\subsubsection{建表语句}
+\label{sec-3-1-3}
+见本项目 Github 页面\footnote{\url{https://github.com/dsdshcym/Database-Query-Optimization/blob/master/init.sql}}
+
+其中所有 Char, Float 变量均为定长，保证效率\footnote{\url{http://coolshell.cn/articles/1846.html} 第 15 条}
+\subsection{查询优化}
+\label{sec-3-2}
+\subsubsection{单表操作}
+\label{sec-3-2-1}
+\begin{itemize}
+\item 查询表中的所有字段
+\label{sec-3-2-1-1}
+\begin{enumerate}
+\item 查询 basic 表
+\begin{enumerate}
+\item 原查询
+
+实际应用中会出现查询所有店铺信息的情况，比如查询 basic
+表中的所有字段的结果
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select *
+from basic;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra |
++----+-------------+-------+------+---------------+------+---------+------+------+-------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | NULL  |
++----+-------------+-------+------+---------------+------+---------+------+------+-------+
+1 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 为 963
+
+\item 无法优化
+
+查询所有字段需遍历表中所有元组，无法再进一步优化了
+\end{enumerate}
+
+\item 查询所有小类
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select *
+from small_cate_id_small_cate;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------------------------+------+---------------+------+---------+------+------+-------+
+| id | select_type | table                    | type | possible_keys | key  | key_len | ref  | rows | Extra |
++----+-------------+--------------------------+------+---------------+------+---------+------+------+-------+
+|  1 | SIMPLE      | small_cate_id_small_cate | ALL  | NULL          | NULL | NULL    | NULL |   37 | NULL  |
++----+-------------+--------------------------+------+---------------+------+---------+------+------+-------+
+1 row in set (0.03 sec)
+\end{verbatim}
+
+\item 无法优化
+
+查询所有字段需遍历表中所有元组，无法再进一步优化了
+\end{enumerate}
+\end{enumerate}
+\item 查询表中的指定字段
+\label{sec-3-2-1-2}
+\begin{enumerate}
+\item 查询所有店铺的名称
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select name
+from basic;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra |
++----+-------------+-------+------+---------------+------+---------+------+------+-------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | NULL  |
++----+-------------+-------+------+---------------+------+---------+------+------+-------+
+1 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 为 963
+
+\item 无法优化
+
+该查询需遍历表中所有元组，无法再进一步优化了
+\end{enumerate}
+
+\item 查询优惠表中的所有团购信息
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select group_info
+from discount;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+----------+------+---------------+------+---------+------+------+-------+
+| id | select_type | table    | type | possible_keys | key  | key_len | ref  | rows | Extra |
++----+-------------+----------+------+---------------+------+---------+------+------+-------+
+|  1 | SIMPLE      | discount | ALL  | NULL          | NULL | NULL    | NULL | 1000 | NULL  |
++----+-------------+----------+------+---------------+------+---------+------+------+-------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+\item 无法优化
+
+该查询需遍历表中所有元组，无法再进一步优化了
+\end{enumerate}
+\end{enumerate}
+\item 查询表中没有重复的字段（distinct）的使用
+\label{sec-3-2-1-3}
+\begin{enumerate}
+\item 查询不重名的所有店铺名称
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select distinct name
+from basic;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-----------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra           |
++----+-------------+-------+------+---------------+------+---------+------+------+-----------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using temporary |
++----+-------------+-------+------+---------------+------+---------+------+------+-----------------+
+1 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 为 963
+
+\item 无法优化
+
+该查询需遍历表中所有元组，无法再进一步优化了
+\end{enumerate}
+
+\item 查询所有地图类型
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select distinct map_type
+from map_info;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+----------+------+---------------+------+---------+------+------+-----------------+
+| id | select_type | table    | type | possible_keys | key  | key_len | ref  | rows | Extra           |
++----+-------------+----------+------+---------------+------+---------+------+------+-----------------+
+|  1 | SIMPLE      | map_info | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using temporary |
++----+-------------+----------+------+---------------+------+---------+------+------+-----------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_map_type on map_info(map_type);
+\end{lstlisting}
+
+再次查询
+
+\begin{verbatim}
++----+-------------+----------+-------+----------------+----------------+---------+------+------+--------------------------+
+| id | select_type | table    | type  | possible_keys  | key            | key_len | ref  | rows | Extra                    |
++----+-------------+----------+-------+----------------+----------------+---------+------+------+--------------------------+
+|  1 | SIMPLE      | map_info | range | index_map_type | index_map_type | 1       | NULL |    5 | Using index for group-by |
++----+-------------+----------+-------+----------------+----------------+---------+------+------+--------------------------+
+1 row in set (0.02 sec)
+\end{verbatim}
+
+rows 变为 5 ，效率显著提高
+\end{enumerate}
+\end{enumerate}
+\item 条件查询各表主键的字段（单值查询或范围查询）
+\label{sec-3-2-1-4}
+\begin{enumerate}
+\item 用一个精确的店编号去查找店铺信息
+\begin{enumerate}
+\item 原查询
+
+比如查找 basic 中 shop\_id=10328540 的店铺信息
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select *
+from basic
+where shop_id=10328540;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+-------+---------------+---------+---------+-------+------+-------+
+| id | select_type | table | type  | possible_keys | key     | key_len | ref   | rows | Extra |
++----+-------------+-------+-------+---------------+---------+---------+-------+------+-------+
+| 1  | SIMPLE      | basic | const | PRIMARY       | PRIMARY | 4       | const | 1    | NULL  |
++----+-------------+-------+-------+---------------+---------+---------+-------+------+-------+
+1 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 已经为 1
+
+\item 无需优化
+
+因为表创建时已经自带以主键为关键值的索引，无需优化
+\end{enumerate}
+\item 用店编号范围去查找一部分店铺信息
+\begin{enumerate}
+\item 原查询
+
+比如查找 basic 中 shop\_id>10328540 and shop\_id<10329940 的店铺信息
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select *
+from basic
+where shop_id>10328540 and shop_id<10329940;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+-------+---------------+---------+---------+------+------+-------------+
+| id | select_type | table | type  | possible_keys | key     | key_len | ref  | rows | Extra       |
++----+-------------+-------+-------+---------------+---------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | range | PRIMARY       | PRIMARY | 4       | NULL | 36   | Using where |
++----+-------------+-------+-------+---------------+---------+---------+------+------+-------------+
+1 rows in set (0.01 sec)
+\end{verbatim}
+
+可见 rows 已经为36
+
+\item 无需优化
+
+因为表创建时已经自带以主键为关键值的索引，无需优化
+\end{enumerate}
+\end{enumerate}
+\item 条件查询各表中普通字段（单值查询或范围查询）
+\label{sec-3-2-1-5}
+\begin{enumerate}
+\item 用店名来查找店铺信息
+\begin{enumerate}
+\item 原查询
+比如查找 base 中 name 为「林师傅」的结果
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select *
+from basic
+where name='林师傅';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.03 sec)
+\end{verbatim}
+
+可见 rows 为 963
+
+\item 对 name 进行索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_name on basic(name);
+\end{lstlisting}
+
+再次查找
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------------+---------+-------+------+-----------------------+
+| id | select_type | table | type | possible_keys | key        | key_len | ref   | rows | Extra                 |
++----+-------------+-------+------+---------------+------------+---------+-------+------+-----------------------+
+| 1  | SIMPLE      | basic | ref  | index_name    | index_name | 150     | const | 1    | Using index condition |
++----+-------------+-------+------+---------------+------------+---------+-------+------+-----------------------+
+1 rows in set (0.04 sec)
+\end{verbatim}
+
+可见 rows 已经变为 1，是优化前的0.1\%
+\end{enumerate}
+\item 查找人均消费在某一范围内的的店铺名称
+\begin{enumerate}
+\item 原查询
+
+比如查找 base 中 avg\_price<50 的结果
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select name
+from basic
+where avg_price<50;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.03 sec)
+\end{verbatim}
+
+可见 rows 为 963
+
+\item 对 avg\_price,name 进行索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_name_price on basic(avg_price,name);
+\end{lstlisting}
+
+再次查找
+
+\begin{verbatim}
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+| id | select_type | table | type  | possible_keys    | key              | key_len | ref  | rows | Extra                    |
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+| 1  | SIMPLE      | basic | range | index_name_price | index_name_price | 2       | NULL | 617  | Using where; Using index |
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+1 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 已经变为617,是优化前的64\%
+\end{enumerate}
+\end{enumerate}
+\item 一个表中多个字段条件查询（单值查询或范围查询）
+\label{sec-3-2-1-6}
+\begin{enumerate}
+\item 多条件查询 remark 表中的 shop\_id
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id
+from remark
+where product_rating > 8.5 and environment_rating > 8.5;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table  | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+--------+------+---------------+------+---------+------+------+-------------+
+|  1 | SIMPLE      | remark | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using where |
++----+-------------+--------+------+---------------+------+---------+------+------+-------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+可见 rows 为 1000
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_product_rating on remark(product_rating);
+create index index_environment_rating on remark(environment_rating);
+\end{lstlisting}
+
+\item 优化后
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id
+from remark
+where product_rating > 8.5 and environment_rating > 8.5;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------+-------+-----------------------------------------------+----------------------+---------+------+------+------------------------------------+
+| id | select_type | table  | type  | possible_keys                                 | key                  | key_len | ref  | rows | Extra                              |
++----+-------------+--------+-------+-----------------------------------------------+----------------------+---------+------+------+------------------------------------+
+|  1 | SIMPLE      | remark | range | index_product_rating,index_environment_rating | index_product_rating | 5       | NULL |   52 | Using index condition; Using where |
++----+-------------+--------+-------+-----------------------------------------------+----------------------+---------+------+------+------------------------------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+优化后 rows 变为 52 ，效率显著提高
+\end{enumerate}
+
+\item 通过 name 和 alias 查询 phone
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select phone from basic
+where name = '巫山烤全鱼' and alias = '重庆鸡公煲';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+|  1 | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL |  963 | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+可见 rows 为 963 ，有优化空间
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_name on basic(name);
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------------+---------+-------+------+------------------------------------+
+| id | select_type | table | type | possible_keys | key        | key_len | ref   | rows | Extra                              |
++----+-------------+-------+------+---------------+------------+---------+-------+------+------------------------------------+
+|  1 | SIMPLE      | basic | ref  | index_name    | index_name | 150     | const |    3 | Using index condition; Using where |
++----+-------------+-------+------+---------------+------------+---------+-------+------+------------------------------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+rows 降为 3
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_alias on basic(alias);
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+------------------------+-------------+---------+-------+------+------------------------------------+
+| id | select_type | table | type | possible_keys          | key         | key_len | ref   | rows | Extra                              |
++----+-------------+-------+------+------------------------+-------------+---------+-------+------+------------------------------------+
+|  1 | SIMPLE      | basic | ref  | index_name,index_alias | index_alias | 120     | const |    1 | Using index condition; Using where |
++----+-------------+-------+------+------------------------+-------------+---------+-------+------+------------------------------------+
+1 row in set (0.07 sec)
+\end{verbatim}
+
+rows 降为 1 ，效率显著提高
+
+\item 更改查询语句顺序 + 索引
+
+由于 alias 上大多为空值，重复率较低，可先查询 alias 再查询 name
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_alias on basic(alias);
+
+explain select phone from basic
+where alias = '重庆鸡公煲' and name = '巫山烤全鱼';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+-------------+---------+-------+------+------------------------------------+
+| id | select_type | table | type | possible_keys | key         | key_len | ref   | rows | Extra                              |
++----+-------------+-------+------+---------------+-------------+---------+-------+------+------------------------------------+
+|  1 | SIMPLE      | basic | ref  | index_alias   | index_alias | 120     | const |    1 | Using index condition; Using where |
++----+-------------+-------+------+---------------+-------------+---------+-------+------+------------------------------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+rows 降为 1 ，效率显著提高
+\end{enumerate}
+
+\item 用店名和人均消费值来查找店铺信息
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select *
+from basic
+where name='林师傅' and avg_price=12;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 为 963
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_name on basic(avg_price,name);
+\end{lstlisting}
+\item 优化后
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+| id | select_type | table | type | possible_keys | key        | key_len | ref         | rows | Extra                 |
++----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+| 1  | SIMPLE      | basic | ref  | index_name    | index_name | 152     | const,const | 1    | Using index condition |
++----+-------------+-------+------+---------------+------------+---------+-------------+------+-----------------------+
+1 rows in set (0.04 sec)
+\end{verbatim}
+
+可见 rows 已经变为 1 ,是优化前的 0.1\%
+\end{enumerate}
+
+\item 查找特定店名但人均消费在一定范围的店铺名称
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select name
+from basic
+where name='林师傅' and avg_price<50;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.04 sec)
+\end{verbatim}
+
+可见 rows 为 1000
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_name_price on basic(avg_price,name);
+\end{lstlisting}
+
+\item 优化后
+
+\begin{verbatim}
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+| id | select_type | table | type  | possible_keys    | key              | key_len | ref  | rows | Extra                    |
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+| 1  | SIMPLE      | basic | range | index_name_price | index_name_price | 2       | NULL | 617  | Using where; Using index |
++----+-------------+-------+-------+------------------+------------------+---------+------+------+--------------------------+
+\end{verbatim}
+
+可见 rows 已经变为 617 ，是优化前的 61.7\%
+\end{enumerate}
+\end{enumerate}
+\item 用”in”进行条件查询
+\label{sec-3-2-1-7}
+\begin{enumerate}
+\item 用几个 small\_cate\_id 来查询 shop\_id
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id
+from shop_id_small_cate_id
+where small_cate_id in ('g101', 'g103', 'g105', 'g107');
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-----------------------+-------+---------------+---------------+---------+------+------+--------------------------+
+| id | select_type | table                 | type  | possible_keys | key           | key_len | ref  | rows | Extra                    |
++----+-------------+-----------------------+-------+---------------+---------------+---------+------+------+--------------------------+
+|  1 | SIMPLE      | shop_id_small_cate_id | range | small_cate_id | small_cate_id | 18      | NULL |   76 | Using where; Using index |
++----+-------------+-----------------------+-------+---------------+---------------+---------+------+------+--------------------------+
+1 row in set (0.01 sec)
+\end{verbatim}
+
+可见 rows 为 76
+
+\item 无需优化
+
+因为 small\_cate\_id 已经是 small\_cate\_id\_small\_cate 表的主键，已有索引，故
+无需优化。
+\end{enumerate}
+
+\item 查找符合某几个店名的店铺
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select *
+from basic
+where name in ('真好味','阿姨布丁','青春学堂');
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 为 963
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_name on basic(name);
+\end{lstlisting}
+
+\item 优化后
+
+\begin{verbatim}
++----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+| id | select_type | table | type  | possible_keys | key        | key_len | ref  | rows | Extra                 |
++----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+| 1  | SIMPLE      | basic | range | index_name    | index_name | 150     | NULL | 3    | Using index condition |
++----+-------------+-------+-------+---------------+------------+---------+------+------+-----------------------+
+1 rows in set (0.04 sec)
+\end{verbatim}
+
+可见 rows 已经变为 3 ,是优化前的 0.3\%
+\end{enumerate}
+\end{enumerate}
+\item 一个表中 group by、order by、having 联合条件查询
+\label{sec-3-2-1-8}
+\begin{enumerate}
+\item 按平均价格来查询
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select * from basic
+where avg_price < 20
+order by avg_price;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-----------------------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra                       |
++----+-------------+-------+------+---------------+------+---------+------+------+-----------------------------+
+|  1 | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL |  963 | Using where; Using filesort |
++----+-------------+-------+------+---------------+------+---------+------+------+-----------------------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+可见 rows 为 963
+
+\item 利用索引进行优化
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_price on basic(avg_price);
+\end{lstlisting}
+
+\item 优化后
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select * from basic
+where avg_price < 20
+order by avg_price;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+-------+---------------+-------------+---------+------+------+-----------------------+
+| id | select_type | table | type  | possible_keys | key         | key_len | ref  | rows | Extra                 |
++----+-------------+-------+-------+---------------+-------------+---------+------+------+-----------------------+
+|  1 | SIMPLE      | basic | range | index_price   | index_price | 2       | NULL |  235 | Using index condition |
++----+-------------+-------+-------+---------------+-------------+---------+------+------+-----------------------+
+1 row in set (0.04 sec)
+\end{verbatim}
+\end{enumerate}
+
+\item remark 表分组排序筛选查找
+\begin{enumerate}
+\item 原查询
+
+将 remark 按环境评分 environment\_rating 分组,筛选出食品评分 product\_rating
+> 7 的餐馆, 并且按平均评价数量 all\_remarks 排序
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id,environment_rating,product_rating,all_remarks
+from remark
+group by environment_rating
+having product_rating>7
+order by all_remarks;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+| id | select_type | table  | type | possible_keys | key  | key_len | ref  | rows | Extra                           |
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+| 1  | SIMPLE      | remark | ALL  | NULL          | NULL | NULL    | NULL | 1000 | Using temporary; Using filesort |
++----+-------------+--------+------+---------------+------+---------+------+------+---------------------------------+
+1 rows in set (0.03 sec)
+\end{verbatim}
+
+可见 rows 为 1000
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_environment_rating,product_rating,all_remarks on remark(environment_rating,product_rating,all_remarks);
+\end{lstlisting}
+\item 优化后
+
+\begin{verbatim}
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+| id | select_type | table  | type  | possible_keys | key     | key_len | ref  | rows | Extra                                                     |
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+| 1  | SIMPLE      | remark | range | index_1       | index_1 | 5       | NULL | 84   | Using index for group-by; Using temporary; Using filesort |
++----+-------------+--------+-------+---------------+---------+---------+------+------+-----------------------------------------------------------+
+1 rows in set (0.06 sec)
+\end{verbatim}
+
+可见 rows 已经变为 84 ,是优化前的 0.84\%
+\end{enumerate}
+\end{enumerate}
+\end{itemize}
+\subsubsection{复合查询}
+\label{sec-3-2-2}
+\begin{itemize}
+\item 多表联合查询
+\label{sec-3-2-2-1}
+\begin{enumerate}
+\item 查询某 city 的所有 shop\_id
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id
+from shop_id_city_id as SC, city_id_city as C
+where SC.city_id = C.city_id and C.city = '上海';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+---------+---------+----------------+------+-------------+
+| id | select_type | table | type | possible_keys | key     | key_len | ref            | rows | Extra       |
++----+-------------+-------+------+---------------+---------+---------+----------------+------+-------------+
+|  1 | SIMPLE      | C     | ALL  | PRIMARY       | NULL    | NULL    | NULL           |   59 | Using where |
+|  1 | SIMPLE      | SC    | ref  | city_id       | city_id | 2       | test.C.city_id |    1 | Using index |
++----+-------------+-------+------+---------------+---------+---------+----------------+------+-------------+
+2 rows in set (0.01 sec)
+\end{verbatim}
+
+可见 rows 为 59 * 1 ，因 city\_id 为主键，故在 SC 表上无需优化
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_city on city_id_city(city);
+\end{lstlisting}
+
+\item 优化后
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id
+from shop_id_city_id as SC, city_id_city as C
+where SC.city_id = C.city_id and C.city = '上海';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+--------------------+------------+---------+----------------+------+--------------------------+
+| id | select_type | table | type | possible_keys      | key        | key_len | ref            | rows | Extra                    |
++----+-------------+-------+------+--------------------+------------+---------+----------------+------+--------------------------+
+|  1 | SIMPLE      | C     | ref  | PRIMARY,index_city | index_city | 45      | const          |    1 | Using where; Using index |
+|  1 | SIMPLE      | SC    | ref  | city_id            | city_id    | 2       | test.C.city_id |    1 | Using index              |
++----+-------------+-------+------+--------------------+------------+---------+----------------+------+--------------------------+
+2 rows in set (0.01 sec)
+\end{verbatim}
+
+可见 rows 变为 1 * 1 ，效率显著提高
+\end{enumerate}
+
+\item 查询某小类下的所有商铺名
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select B.shop_id, B.name
+from basic as B, shop_id_small_cate_id as SS
+where B.shop_id = SS.shop_id and SS.small_cate_id = 'g101';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+--------+-----------------------+---------------+---------+-----------------+------+--------------------------+
+| id | select_type | table | type   | possible_keys         | key           | key_len | ref             | rows | Extra                    |
++----+-------------+-------+--------+-----------------------+---------------+---------+-----------------+------+--------------------------+
+|  1 | SIMPLE      | SS    | ref    | PRIMARY,small_cate_id | small_cate_id | 18      | const           |   32 | Using where; Using index |
+|  1 | SIMPLE      | B     | eq_ref | PRIMARY               | PRIMARY       | 4       | test.SS.shop_id |    1 | NULL                     |
++----+-------------+-------+--------+-----------------------+---------------+---------+-----------------+------+--------------------------+
+2 rows in set (0.01 sec)
+\end{verbatim}
+
+rows 为 32 * 1
+
+\item 无需优化
+
+因为 small\_cate\_id 和 shop\_id 都是主键，已有索引，故无需优化
+\end{enumerate}
+
+\item 寻找平均价格低于 20 元且食物评分高于 8 的店铺
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select basic.name,basic.avg_price,remark.product_rating
+from basic,remark
+where basic.shop_id=remark.shop_id and basic.avg_price<20 and remark.product_rating>8;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+| id | select_type | table  | type   | possible_keys | key     | key_len | ref                | rows | Extra       |
++----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+| 1  | SIMPLE      | basic  | ALL    | PRIMARY       | NULL    | NULL    | NULL               | 1000 | Using where |
+| 1  | SIMPLE      | remark | eq_ref | PRIMARY       | PRIMARY | 4       | test.basic.shop_id | 1    | Using where |
++----+-------------+--------+--------+---------------+---------+---------+--------------------+------+-------------+
+2 rows in set (0.06 sec)
+\end{verbatim}
+
+可见 rows 分别为 1000, 1
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_avg_price on basic(avg_price);
+\end{lstlisting}
+\item 优化后
+
+\begin{verbatim}
++----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+| id | select_type | table  | type   | possible_keys           | key             | key_len | ref                | rows | Extra                 |
++----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+| 1  | SIMPLE      | basic  | range  | PRIMARY,index_avg_price | index_avg_price | 2       | NULL               | 235  | Using index condition |
+| 1  | SIMPLE      | remark | eq_ref | PRIMARY                 | PRIMARY         | 4       | test.basic.shop_id | 1    | Using where           |
++----+-------------+--------+--------+-------------------------+-----------------+---------+--------------------+------+-----------------------+
+2 rows in set (0.05 sec)
+\end{verbatim}
+
+可见 rows 已经变为 235, 1 ，是优化前的 23.5\%
+\end{enumerate}
+\end{enumerate}
+\item join 查询
+\label{sec-3-2-2-2}
+\begin{enumerate}
+\item 利用拼音查询城市名
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select city
+from city_id_city as C
+inner join city_id_city_pinyin as CP
+where C.city_id = CP.city_id and CP.city_pinyin = 'shanghai';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+| id | select_type | table | type   | possible_keys | key     | key_len | ref            | rows | Extra       |
++----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+|  1 | SIMPLE      | C     | ALL    | PRIMARY       | NULL    | NULL    | NULL           |   59 | NULL        |
+|  1 | SIMPLE      | CP    | eq_ref | PRIMARY       | PRIMARY | 2       | test.C.city_id |    1 | Using where |
++----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+2 rows in set (0.01 sec)
+\end{verbatim}
+
+可见 rows 为 59 * 1 ，因 city\_id 为主键，故在 C 表上无需优化
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_city_pinyin on city_id_city_pinyin(city_pinyin);
+\end{lstlisting}
+
+\item 优化后
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select city
+from city_id_city as C
+inner join city_id_city_pinyin as CP
+where C.city_id = CP.city_id and CP.city_pinyin = 'shanghai';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+--------+---------------------------+-------------------+---------+-----------------+------+--------------------------+
+| id | select_type | table | type   | possible_keys             | key               | key_len | ref             | rows | Extra                    |
++----+-------------+-------+--------+---------------------------+-------------------+---------+-----------------+------+--------------------------+
+|  1 | SIMPLE      | CP    | ref    | PRIMARY,index_city_pinyin | index_city_pinyin | 45      | const           |    1 | Using where; Using index |
+|  1 | SIMPLE      | C     | eq_ref | PRIMARY                   | PRIMARY           | 2       | test.CP.city_id |    1 | NULL                     |
++----+-------------+-------+--------+---------------------------+-------------------+---------+-----------------+------+--------------------------+
+2 rows in set (0.01 sec)
+\end{verbatim}
+
+rows 变为 1 * 1 ，效率显著提高
+\end{enumerate}
+
+\item 获取所有商铺的图片
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select B.shop_id, D.photos
+from basic as B
+inner join dazhong as D
+where B.shop_id = D.shop_id;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+| id | select_type | table | type   | possible_keys | key     | key_len | ref            | rows | Extra       |
++----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+|  1 | SIMPLE      | D     | ALL    | PRIMARY       | NULL    | NULL    | NULL           |  939 | NULL        |
+|  1 | SIMPLE      | B     | eq_ref | PRIMARY       | PRIMARY | 4       | test.D.shop_id |    1 | Using index |
++----+-------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+2 rows in set (0.43 sec)
+\end{verbatim}
+
+可见 rows 为 939 * 1
+
+\item 无法优化
+
+因为每个商铺的图片地址均不相同，故读取所有地址需要遍历全表，无法优化
+\end{enumerate}
+\end{enumerate}
+\item 存在量词（exists）查询
+\label{sec-3-2-2-3}
+\begin{enumerate}
+\item 查询产品评价高于 9 的 shop\_id, name
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select B.shop_id, B.name
+from basic as B
+where exists
+(select *
+from remark as R
+where R.shop_id = B.shop_id and R.product_rating > 9);
+\end{lstlisting}
+
+\begin{verbatim}
++----+--------------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+| id | select_type        | table | type   | possible_keys | key     | key_len | ref            | rows | Extra       |
++----+--------------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+|  1 | PRIMARY            | B     | ALL    | NULL          | NULL    | NULL    | NULL           |  963 | Using where |
+|  2 | DEPENDENT SUBQUERY | R     | eq_ref | PRIMARY       | PRIMARY | 4       | test.B.shop_id |    1 | Using where |
++----+--------------------+-------+--------+---------------+---------+---------+----------------+------+-------------+
+2 rows in set (0.01 sec)
+\end{verbatim}
+
+可见 rows 为 963 * 1
+
+\item 添加索引
+
+因 shop\_id 已有索引，故不再添加
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_product_rating on remark(product_rating);
+\end{lstlisting}
+
+但添加索引后结果不变，考虑是 exists 的问题
+
+\item 改为 join 查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select B.shop_id, B.name
+from basic as B, remark as R
+where R.shop_id = B.shop_id and R.product_rating > 9;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+--------+------------------------------+----------------------+---------+----------------+------+--------------------------+
+| id | select_type | table | type   | possible_keys                | key                  | key_len | ref            | rows | Extra                    |
++----+-------------+-------+--------+------------------------------+----------------------+---------+----------------+------+--------------------------+
+|  1 | SIMPLE      | R     | range  | PRIMARY,index_product_rating | index_product_rating | 5       | NULL           |    5 | Using where; Using index |
+|  1 | SIMPLE      | B     | eq_ref | PRIMARY                      | PRIMARY              | 4       | test.R.shop_id |    1 | NULL                     |
++----+-------------+-------+--------+------------------------------+----------------------+---------+----------------+------+--------------------------+
+2 rows in set (0.05 sec)
+\end{verbatim}
+
+经过添加索引和改为 join 查询后， rows 变为 5 * 1 ，效率显著提高
+\end{enumerate}
+\end{enumerate}
+\item 嵌套子查询（select \ldots{} from (select \ldots{})）
+\label{sec-3-2-2-4}
+\begin{enumerate}
+\item 查找 stars 大于 4.0 的 shop\_id
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+select shop_id
+from (select * from dazhong where stars > 4.0) as D;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+------------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table      | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+------------+------+---------------+------+---------+------+------+-------------+
+|  1 | PRIMARY     | <derived2> | ALL  | NULL          | NULL | NULL    | NULL |  958 | NULL        |
+|  2 | DERIVED     | dazhong    | ALL  | NULL          | NULL | NULL    | NULL |  958 | Using where |
++----+-------------+------------+------+---------------+------+---------+------+------+-------------+
+2 rows in set (0.03 sec)
+\end{verbatim}
+
+可见 rows 为 958 * 958 ，效率极低
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_stars on dazhong(stars);
+\end{lstlisting}
+
+添加索引后
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id
+from (select * from dazhong where stars > 4.0) as D;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+------------+-------+---------------+-------------+---------+------+------+-----------------------+
+| id | select_type | table      | type  | possible_keys | key         | key_len | ref  | rows | Extra                 |
++----+-------------+------------+-------+---------------+-------------+---------+------+------+-----------------------+
+|  1 | PRIMARY     | <derived2> | ALL   | NULL          | NULL        | NULL    | NULL |   86 | NULL                  |
+|  2 | DERIVED     | dazhong    | range | index_stars   | index_stars | 5       | NULL |   86 | Using index condition |
++----+-------------+------------+-------+---------------+-------------+---------+------+------+-----------------------+
+2 rows in set (0.02 sec)
+\end{verbatim}
+
+rows 降为 86 * 86 ，效率在一定程度上提高
+
+\item 改为非嵌套查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id
+from dazhong where stars > 4.0;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+---------+-------+---------------+-------------+---------+------+------+--------------------------+
+| id | select_type | table   | type  | possible_keys | key         | key_len | ref  | rows | Extra                    |
++----+-------------+---------+-------+---------------+-------------+---------+------+------+--------------------------+
+|  1 | SIMPLE      | dazhong | range | index_stars   | index_stars | 5       | NULL |   86 | Using where; Using index |
++----+-------------+---------+-------+---------------+-------------+---------+------+------+--------------------------+
+1 row in set (0.01 sec)
+\end{verbatim}
+
+经过添加索引、改为非嵌套查询优化后， rows 降为 86 ，效率显著提高
+\end{enumerate}
+
+\item 查找所有位于杨浦区的店铺 id 和名称与平均价格
+
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id,name,avg_price
+from basic
+where shop_id in(select shop_id
+from shop_id_area
+where area='杨浦区');
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------------+--------+---------------+---------+---------+---------------------------+------+-------------+
+| id | select_type | table        | type   | possible_keys | key     | key_len | ref                       | rows | Extra       |
++----+-------------+--------------+--------+---------------+---------+---------+---------------------------+------+-------------+
+| 1  | SIMPLE      | shop_id_area | ALL    | PRIMARY       | NULL    | NULL    | NULL                      | 1000 | Using where |
+| 1  | SIMPLE      | basic        | eq_ref | PRIMARY       | PRIMARY | 4       | test.shop_id_area.shop_id | 1    | NULL        |
++----+-------------+--------------+--------+---------------+---------+---------+---------------------------+------+-------------+
+2 rows in set (0.04 sec)
+\end{verbatim}
+
+可见 rows 分别为 1000,1
+
+\item 添加索引
+
+对 shop\_id\_area 的 area 进行索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_shop_id_area on shop_id_area(area);
+\end{lstlisting}
+
+\item 优化后
+
+\begin{verbatim}
++----+-------------+--------------+--------+----------------------------+--------------------+---------+---------------------------+------+--------------------------+
+| id | select_type | table        | type   | possible_keys              | key                | key_len | ref                       | rows | Extra                    |
++----+-------------+--------------+--------+----------------------------+--------------------+---------+---------------------------+------+--------------------------+
+| 1  | SIMPLE      | shop_id_area | ref    | PRIMARY,index_shop_id_area | index_shop_id_area | 120     | const                     | 19   | Using where; Using index |
+| 1  | SIMPLE      | basic        | eq_ref | PRIMARY                    | PRIMARY            | 4       | test.shop_id_area.shop_id | 1    | NULL                     |
++----+-------------+--------------+--------+----------------------------+--------------------+---------+---------------------------+------+--------------------------+
+2 rows in set (0.03 sec)
+\end{verbatim}
+
+可见 rows 已经变为 19, 1 ，是优化前的 1.9\%
+\end{enumerate}
+\end{enumerate}
+\end{itemize}
+\subsubsection{其他查询}
+\label{sec-3-2-3}
+\begin{itemize}
+\item 向表中插入记录
+\label{sec-3-2-3-1}
+\begin{enumerate}
+\item 直接向 city\_id\_city 中插入新元组
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain insert into city_id_city(city_id, city)
+values (1001, 'test');
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+----------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra          |
++----+-------------+-------+------+---------------+------+---------+------+------+----------------+
+|  1 | SIMPLE      | NULL  | NULL | NULL          | NULL | NULL    | NULL | NULL | No tables used |
++----+-------------+-------+------+---------------+------+---------+------+------+----------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+直接插入无需优化
+\end{enumerate}
+\end{enumerate}
+\item 删除记录
+\label{sec-3-2-3-2}
+\begin{enumerate}
+\item 直接将 city\_id\_city 中的一项删除
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain delete
+from city_id_city
+where city = 'test';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table        | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+--------------+------+---------------+------+---------+------+------+-------------+
+|  1 | SIMPLE      | city_id_city | ALL  | NULL          | NULL | NULL    | NULL |   60 | Using where |
++----+-------------+--------------+------+---------------+------+---------+------+------+-------------+
+1 row in set (0.01 sec)
+\end{verbatim}
+
+rows 为 60
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_city on city_id_city(city);
+\end{lstlisting}
+
+添加索引后
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain delete
+from city_id_city
+where city = 'test';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------------+-------+---------------+------------+---------+-------+------+-------------+
+| id | select_type | table        | type  | possible_keys | key        | key_len | ref   | rows | Extra       |
++----+-------------+--------------+-------+---------------+------------+---------+-------+------+-------------+
+|  1 | SIMPLE      | city_id_city | range | index_city    | index_city | 45      | const |    1 | Using where |
++----+-------------+--------------+-------+---------------+------------+---------+-------+------+-------------+
+1 row in set (0.01 sec)
+\end{verbatim}
+
+rows 变为 1 ，效率显著提高
+
+\item 使用主键
+
+使用主键来进行删除操作
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain delete
+from city_id_city
+where city_id = 1001 and city = 'test';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+--------------+-------+---------------+---------+---------+-------+------+-------------+
+| id | select_type | table        | type  | possible_keys | key     | key_len | ref   | rows | Extra       |
++----+-------------+--------------+-------+---------------+---------+---------+-------+------+-------------+
+|  1 | SIMPLE      | city_id_city | range | PRIMARY       | PRIMARY | 2       | const |    1 | Using where |
++----+-------------+--------------+-------+---------------+---------+---------+-------+------+-------------+
+1 row in set (0.03 sec)
+\end{verbatim}
+
+rows 也为 1 ，效率显著提高
+\end{enumerate}
+\end{enumerate}
+\item 聚集函数
+\label{sec-3-2-3-3}
+\begin{enumerate}
+\item 统计某城市中有多少商铺
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select count(city_id)
+from shop_id_city_id
+where city_id = 1;
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-----------------+------+---------------+---------+---------+-------+------+-------------+
+| id | select_type | table           | type | possible_keys | key     | key_len | ref   | rows | Extra       |
++----+-------------+-----------------+------+---------------+---------+---------+-------+------+-------------+
+|  1 | SIMPLE      | shop_id_city_id | ref  | city_id       | city_id | 2       | const |  257 | Using index |
++----+-------------+-----------------+------+---------------+---------+---------+-------+------+-------------+
+1 row in set (0.00 sec)
+\end{verbatim}
+
+rows 为 257 ，但已经是利用了主键索引了，且 count 函数是需要遍历所有 257 个
+结果的，故已经无法再优化了
+
+\item 实际应用
+
+在实际应用 count 语句时，使用 \texttt{count(*)} 将比 count(\emph{具体键值}) 快。因为
+\texttt{count(*)} 利用的是主键索引\footnote{\url{http://blog.itpub.net/22664653/viewspace-774679/}}。
+\end{enumerate}
+\end{enumerate}
+\item 其他查询
+\label{sec-3-2-3-4}
+\begin{enumerate}
+\item Like 语句
+\begin{enumerate}
+\item 查找所有星巴克的分店
+\begin{enumerate}
+\item 原查询
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+explain select shop_id,name
+from basic
+where name like '星巴克%';
+\end{lstlisting}
+
+\begin{verbatim}
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+| 1  | SIMPLE      | basic | ALL  | NULL          | NULL | NULL    | NULL | 963  | Using where |
++----+-------------+-------+------+---------------+------+---------+------+------+-------------+
+1 rows in set (0.03 sec)
+\end{verbatim}
+
+可见 rows 为 963
+
+\item 添加索引
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+create index index_name on basic(name);
+\end{lstlisting}
+
+\item 优化后
+
+\begin{verbatim}
++----+-------------+-------+-------+---------------+------------+---------+------+------+--------------------------+
+| id | select_type | table | type  | possible_keys | key        | key_len | ref  | rows | Extra                    |
++----+-------------+-------+-------+---------------+------------+---------+------+------+--------------------------+
+| 1  | SIMPLE      | basic | range | index_name    | index_name | 150     | NULL | 6    | Using where; Using index |
++----+-------------+-------+-------+---------------+------------+---------+------+------+--------------------------+
+1 rows in set (0.03 sec)
+\end{verbatim}
+
+可见 rows 已经变为 6 ,是优化前的 0.6\%
+
+\item 优化查询语句
+
+将 Like 查询转化为范围查询效率更高 （「兌」是「克」在 utf-8 编码下的后一位）
+
+\lstset{breaklines,keywordstyle=\color{black}\bfseries,basicstyle=\ttfamily\scriptsize,language=SQL,label= ,caption= ,numbers=none}
+\begin{lstlisting}
+select shop_id, name
+from basic
+where name>'星巴克' and name<'星巴兌';
+\end{lstlisting}
+\end{enumerate}
+\end{enumerate}
+\end{enumerate}
+\end{itemize}
+% Emacs 24.5.1 (Org mode 8.2.10)
+\end{document}

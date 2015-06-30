@@ -1,8 +1,9 @@
 #+TITLE: MYSQL 查询优化实验报告
 #+AUTHOR: 陈一鸣 解子傲
 #+LATEX_HEADER: \usepackage{xeCJK}
-#+LATEX_HEADER: \setCJKmainfont{Hiragino Sans GB}
-#+LATEX_HEADER: \usepackage[a3paper]{geometry}
+#+LATEX_HEADER: \setCJKmainfont{SHS UI PRChinaGB}
+#+LATEX_HEADER: \setmainfont{Helvetica}
+#+LATEX_HEADER: \usepackage[a3paper, margin=2cm]{geometry}
 * 概述
 ** 主要目的
 通过对不同情况下查询语句的执行分析，巩固和加深对查询和查询优化相关理论知识的理解，
